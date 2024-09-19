@@ -122,7 +122,7 @@ void setup() {
 
 // TODO: AMOUNT SETUP BY KEYPAD, IF AMOUNT 0, then DO NOT SEND REQUEST
 void loop() {
-  delay(50);
+  delay(10);
   // Check if mode button was pressed
   char pressedKey = keypad.getKey();
   if (pressedKey == 'M') {
