@@ -2,14 +2,14 @@
 Connection (module pin - esp32 pin)
 
 LCD display:    RFID RC522:             Keypad:
-GND - GND       SDA - D5                1 row - D32
-VCC - VIN       SCK - D18               2 row - D33
-SDA - D21       MOSI - D23              3 row - D25
-SCL - D22       MISO - D19              4 row - D26
-                IRQ - NOT CONNECTED     1 column - D27
-                GND - GND               2 column - D14
-                RST - D2                3 column - D12
-                3.3V - 3.3V             4 column - D13
+GND - GND       SDA - D5                1 row - D27
+VCC - VIN       SCK - D18               2 row - D14
+SDA - D21       MOSI - D23              3 row - D12
+SCL - D22       MISO - D19              4 row - D13
+                IRQ - NOT CONNECTED     1 column - D32
+                GND - GND               2 column - D33
+                RST - D2                3 column - D25
+                3.3V - 3.3V             4 column - D26
 */
 
 #include <SPI.h>
@@ -18,6 +18,10 @@ SCL - D22       MISO - D19              4 row - D26
 #include <MFRC522.h>
 #include <HTTPClient.h>
 #include <LiquidCrystal_I2C.h>
+#include <ArduinoJson.h>
+
+#include "environment_vars.h"
+
 
 #define ROWS 4
 #define COLS 4
@@ -27,27 +31,30 @@ SCL - D22       MISO - D19              4 row - D26
 char keyMap[ROWS][COLS] = {
   {'1','2','3', 'D'}, // D - in setup mode: Delete last symbol in working mode: ???
   {'4','5','6', 'M'}, // M - Mode(work, setup)
-  {'7','8','9', 'H'}, // H - history of payments(card - sum)
-  {'*','0','#', 'C'}  // C - copyrights
+  {'7','8','9', 'C'}, // C - copyrights
+  {'*','0','#', '?'}  
 };
 
-uint8_t rowPins[ROWS] = {32, 33, 25, 26};
-uint8_t colPins[COLS] = {27, 14, 12, 13};
+uint8_t rowPins[ROWS] = {27, 14, 12, 13};
+uint8_t colPins[COLS] = {32, 33, 25, 26};
 
 Keypad keypad = Keypad(makeKeymap(keyMap), rowPins, colPins, ROWS, COLS );
 LiquidCrystal_I2C lcd(0x27,16,2);
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-const char* ssid = "TP-LINK_BAFC38";
-const char* password = "";
+const char* ssid = NETWORK_SSID;  // TODO:
+const char* password = NETWORK_PASSWORD;
 
-const String APIDomain = "http://192.168.0.104:8000/terminal_api/";
-String writingOffMoney = APIDomain + "write_off_money/";
+String ApiDomain = API_DOMAIN;  // TODO: 
+
+String writingOffMoney = ApiDomain + "/terminal_api/write_off_money/";
 
 bool isWorkingMode = true;
 bool isModeChanged = true;
+bool isCopyrightShowed = false;
 
 String amountString = "";
+char pressedKey;
 
 String companyToken = "";
 String validSymbolsForAmount = "0123456789";
@@ -56,8 +63,13 @@ String validSymbolsForToken = validSymbolsForAmount + "*#";
 void wifi_setup() {
   WiFi.begin(ssid, password);
   Serial.print("Connecting");
+  // TODO: while trying to connect to wifi show message
   while(WiFi.status() != WL_CONNECTED) {
-    delay(400);
+    lcd.setCursor(2,0);
+    lcd.print("Connecting to");
+    lcd.setCursor(5,1);
+    lcd.print("Wifi");
+    delay(300);
     Serial.print(".");
   }
   Serial.println("");
@@ -92,10 +104,17 @@ void lcd_setup_mode_text(String token) {
   lcd.print(token);
 }
 
+void lcd_copyrights_text() {
+  lcd.clear();
+  lcd.setCursor(3,0);
+  lcd.print("Copyrights");
+  lcd.setCursor(0,1);
+  lcd.print("reserved by Nik"); 
+}
+
 void lcd_setup() {
   lcd.init();
   lcd.backlight();
-  lcd_work_mode_text();
 }
 
 void rfid_setup() {
@@ -109,32 +128,39 @@ void rfid_setup() {
 
 void setup() {
   Serial.begin(9600);
+  
+  // LCD display setup
+  lcd_setup();
 
   // WIFI connecting
   wifi_setup();
-
-  // LCD display setup
-  lcd_setup();
+  
+  lcd_work_mode_text();
 
   // RFID(card) module setup
   rfid_setup();
 }
 
-// TODO: AMOUNT SETUP BY KEYPAD, IF AMOUNT 0, then DO NOT SEND REQUEST
 void loop() {
   delay(10);
+  
   // Check if mode button was pressed
-  char pressedKey = keypad.getKey();
+  pressedKey = keypad.getKey();
+  Serial.println(pressedKey);
   if (pressedKey == 'M') {
     isWorkingMode = !isWorkingMode;
     isModeChanged = true;
+  } else if (pressedKey == 'C') {
+    isCopyrightShowed = true;
+    lcd_copyrights_text();
+    delay(1500);
   } else {
     isModeChanged = false;
   }
   
-
   if (isWorkingMode) {
-    if (isModeChanged) {
+    if (isModeChanged || isCopyrightShowed) {
+      isCopyrightShowed = false;
       lcd_work_mode_text();
     }
     
@@ -178,26 +204,25 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
 
-      Serial.println(writingOffMoney.c_str());
       http.begin(writingOffMoney.c_str());
       http.addHeader("Content-Type", "application/json");
       
       String requestJson = "{\"card_uid\": \"" + cardUID + "\",\"amount\": " + amountString.toFloat() + ", \"company_token\": \"" + companyToken + "\"}";
       Serial.println(requestJson);
       int httpResponseCode = http.POST(requestJson);
-  
+      String payload = http.getString();
+
+      JsonDocument responseJSON;
+      deserializeJson(responseJSON, payload);
+      
+      String terminal_message = responseJSON["terminal_message"];
+      terminal_message = terminal_message == "null" ? "Server error" : terminal_message;
+      
       lcd.clear();
       lcd.setCursor(0,0);
-      if (httpResponseCode > 0) {  // TODO:
-        lcd.print("Response success");
-        delay(500);
-        lcd_work_mode_text(); 
-      } else {
-        String payload = http.getString();
-        lcd.print("Response failure");
-        delay(500);
-        lcd_work_mode_text(); 
-      }
+      lcd.print(terminal_message);
+      delay(1500);
+      lcd_work_mode_text(); 
     }
 
     amountString = "";
@@ -206,8 +231,8 @@ void loop() {
     rfid.PCD_StopCrypto1();
     
   } else {
-    // Serial.println("Setup mode!");
-    if (isModeChanged) {
+    if (isModeChanged || isCopyrightShowed) {
+      isCopyrightShowed = false;
       lcd_setup_mode_text(companyToken);
     }
 
