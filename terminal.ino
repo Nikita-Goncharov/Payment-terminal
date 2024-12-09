@@ -42,12 +42,7 @@ Keypad keypad = Keypad(makeKeymap(keyMap), rowPins, colPins, ROWS, COLS );
 LiquidCrystal_I2C lcd(0x27,16,2);
 MFRC522 rfid(SS_PIN, RST_PIN);
 
-const char* ssid = NETWORK_SSID;  // TODO:
-const char* password = NETWORK_PASSWORD;
-
-String ApiDomain = API_DOMAIN;  // TODO: 
-
-String writingOffMoney = ApiDomain + "/terminal_api/write_off_money/";
+String writingOffMoney = String(API_DOMAIN) + "/terminal_api/write_off_money/";
 
 bool isWorkingMode = true;
 bool isModeChanged = true;
@@ -61,7 +56,7 @@ String validSymbolsForAmount = "0123456789";
 String validSymbolsForToken = validSymbolsForAmount + "*#";
 
 void wifi_setup() {
-  WiFi.begin(ssid, password);
+  WiFi.begin(NETWORK_SSID, NETWORK_PASSWORD);
   Serial.print("Connecting");
   // TODO: while trying to connect to wifi show message
   while(WiFi.status() != WL_CONNECTED) {
@@ -199,7 +194,7 @@ void loop() {
     }
     Serial.println();
 
-    rfid.PICC_DumpDetailsToSerial(&(rfid.uid)); //dump some details about the card
+    rfid.PICC_DumpDetailsToSerial(&(rfid.uid)); // dump some details about the card
   
     if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
@@ -226,7 +221,7 @@ void loop() {
     }
 
     amountString = "";
-     
+    
     rfid.PICC_HaltA();
     rfid.PCD_StopCrypto1();
     
